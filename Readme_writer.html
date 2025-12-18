@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intelligent README.md Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        .custom-loader {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: 5px solid #e0e0e0;
+            border-top-color: #3b82f6;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+    <div class="container mx-auto p-4 md:p-8 max-w-6xl">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl md:text-5xl font-bold text-gray-900">Intelligent README.md Generator</h1>
+            <p class="text-lg text-gray-600 mt-2">Upload your project's .zip file to automatically generate a high-quality README.</p>
+        </header>
+
+        <main class="bg-white p-6 md:p-8 rounded-2xl shadow-lg border border-gray-200">
+            <!-- Upload Section -->
+            <div id="upload-section" class="text-center">
+                <div id="drop-zone" class="border-2 border-dashed border-gray-300 rounded-xl p-8 md:p-12 cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-all duration-300">
+                    <div class="flex flex-col items-center justify-center">
+                        <i data-lucide="upload-cloud" class="w-16 h-16 text-gray-400 mb-4"></i>
+                        <p class="text-gray-700 font-semibold">Drag & drop your .zip file here</p>
+                        <p class="text-gray-500 text-sm mt-1">or click to select a file</p>
+                    </div>
+                    <input type="file" id="zip-file-input" class="hidden" accept=".zip">
+                </div>
+                <div id="file-info" class="mt-4 text-gray-600"></div>
+                <button id="generate-button" class="mt-4 bg-blue-600 text-white font-bold py-3 px-8 rounded-lg shadow-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all duration-300" disabled>
+                    Generate README
+                </button>
+            </div>
+            
+            <!-- Loading and Result Section -->
+            <div id="status-section" class="hidden text-center my-8">
+                <div class="flex items-center justify-center space-x-3">
+                     <div id="loader" class="custom-loader"></div>
+                    <p id="status-text" class="text-lg font-medium text-gray-700">Analyzing project...</p>
+                </div>
+            </div>
+
+            <div id="result-section" class="hidden mt-8">
+                <h2 class="text-2xl font-bold mb-4">Generated README.md</h2>
+                <div class="flex justify-end space-x-2 mb-4">
+                    <button id="copy-button" class="bg-gray-200 text-gray-700 font-semibold py-2 px-4 rounded-lg hover:bg-gray-300 transition-all duration-300 flex items-center space-x-2">
+                        <i data-lucide="copy" class="w-4 h-4"></i>
+                        <span>Copy Markdown</span>
+                    </button>
+                    <button id="download-button" class="bg-green-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-green-700 transition-all duration-300 flex items-center space-x-2">
+                        <i data-lucide="download" class="w-4 h-4"></i>
+                        <span>Download .md</span>
+                    </button>
+                </div>
+                <div class="grid md:grid-cols-2 gap-6">
+                    <div>
+                        <h3 class="font-semibold mb-2">Markdown Editor</h3>
+                        <textarea id="markdown-output" class="w-full h-[500px] p-4 border border-gray-300 rounded-lg bg-gray-50 font-mono text-sm resize-none"></textarea>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold mb-2">Live Preview</h3>
+                        <div id="html-preview" class="w-full h-[500px] p-4 border border-gray-300 rounded-lg bg-white overflow-y-auto prose"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('zip-file-input');
+        const fileInfo = document.getElementById('file-info');
+        const generateButton = document.getElementById('generate-button');
+        const uploadSection = document.getElementById('upload-section');
+        const statusSection = document.getElementById('status-section');
+        const loader = document.getElementById('loader');
+        const statusText = document.getElementById('status-text');
+        const resultSection = document.getElementById('result-section');
+        const markdownOutput = document.getElementById('markdown-output');
+        const htmlPreview = document.getElementById('html-preview');
+        const copyButton = document.getElementById('copy-button');
+        const downloadButton = document.getElementById('download-button');
+
+        let projectZip = null;
+        let projectName = '';
+
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // --- Drag and Drop Logic ---
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-blue-500', 'bg-blue-50');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            const files = e.dataTransfer.files;
+            if (files.length > 0 && files[0].name.endsWith('.zip')) {
+                handleFile(files[0]);
+            } else {
+                alert('Please drop a .zip file.');
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            projectZip = file;
+            projectName = file.name.replace('.zip', '');
+            fileInfo.innerHTML = `
+                <div class="flex items-center justify-center space-x-2 bg-gray-100 p-2 rounded-lg">
+                    <i data-lucide="file-zip" class="w-5 h-5 text-gray-500"></i>
+                    <span class="font-medium">${file.name}</span>
+                    <span class="text-sm text-gray-500">(${(file.size / 1024).toFixed(2)} KB)</span>
+                </div>`;
+            lucide.createIcons();
+            generateButton.disabled = false;
+        }
+
+        // --- Core Logic ---
+        generateButton.addEventListener('click', async () => {
+            if (!projectZip) return;
+
+            uploadSection.classList.add('hidden');
+            statusSection.classList.remove('hidden');
+            resultSection.classList.add('hidden');
+
+            try {
+                statusText.textContent = 'Analyzing project structure...';
+                const analysis = await analyzeZip(projectZip);
+                
+                statusText.textContent = 'Generating README with AI...';
+                const readmeContent = await generateReadmeWithAI(analysis);
+                
+                markdownOutput.value = readmeContent;
+                htmlPreview.innerHTML = marked.parse(readmeContent);
+                
+                statusSection.classList.add('hidden');
+                resultSection.classList.remove('hidden');
+
+            } catch (error) {
+                console.error('Error generating README:', error);
+                alert(`An error occurred: ${error.message}`);
+                statusSection.classList.add('hidden');
+                uploadSection.classList.remove('hidden');
+            }
+        });
+
+        async function analyzeZip(file) {
+            const zip = await JSZip.loadAsync(file);
+            let languages = {};
+            let dependencies = { 'requirements.txt': null, 'package.json': null };
+            let fileStructure = [];
+
+            const promises = [];
+            zip.forEach((relativePath, zipEntry) => {
+                if (!zipEntry.dir) {
+                    // 1. Analyze language
+                    const extension = relativePath.split('.').pop();
+                    if(extension) {
+                        languages[extension] = (languages[extension] || 0) + 1;
+                    }
+
+                    // 2. Add to file structure (limit depth for prompt)
+                    const depth = relativePath.split('/').length -1;
+                    if (depth <= 2) {
+                       fileStructure.push(relativePath);
+                    }
+                    
+
+                    // 3. Analyze dependencies
+                    if (relativePath.endsWith('requirements.txt')) {
+                        promises.push(zipEntry.async('string').then(content => {
+                            dependencies['requirements.txt'] = content.split('\n').filter(l => l.trim() && !l.startsWith('#')).join(', ');
+                        }));
+                    } else if (relativePath.endsWith('package.json')) {
+                         promises.push(zipEntry.async('string').then(content => {
+                            try {
+                                const pkg = JSON.parse(content);
+                                const deps = {...pkg.dependencies, ...pkg.devDependencies};
+                                dependencies['package.json'] = Object.keys(deps).join(', ');
+                            } catch (e) { console.error('Error parsing package.json'); }
+                        }));
+                    }
+                }
+            });
+
+            await Promise.all(promises);
+
+            const primaryLanguage = Object.keys(languages).length > 0 
+                ? Object.entries(languages).sort((a,b) => b[1] - a[1])[0][0]
+                : 'unknown';
+            
+            const languageMap = { 'py': 'Python', 'js': 'JavaScript', 'ts': 'TypeScript', 'java': 'Java', 'html': 'HTML/CSS', 'go': 'Go', 'rb': 'Ruby', 'php': 'PHP' };
+
+            return {
+                projectName: projectName,
+                language: languageMap[primaryLanguage] || primaryLanguage,
+                dependencies: dependencies,
+                fileStructure: fileStructure.slice(0, 20).join('\n') // Limit file count for prompt
+            };
+        }
+
+        async function generateReadmeWithAI(analysis) {
+            const apiKey = ""; // Canvas will provide this
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+            let dependencyInfo = "No dependency file found.";
+            if (analysis.dependencies['requirements.txt']) {
+                dependencyInfo = `A 'requirements.txt' was found with these packages: ${analysis.dependencies['requirements.txt']}.`;
+            } else if (analysis.dependencies['package.json']) {
+                dependencyInfo = `A 'package.json' was found with these packages: ${analysis.dependencies['package.json']}.`;
+            }
+            
+            const prompt = `
+                You are an expert technical writer tasked with creating a README.md file for a new project.
+                Based on the following analysis of the project's file structure, generate a comprehensive and professional README.md in Markdown format.
+
+                **Project Analysis:**
+                - **Project Name:** ${analysis.projectName}
+                - **Primary Language Detected:** ${analysis.language}
+                - **Dependencies Found:** ${dependencyInfo}
+                - **Project File Structure (sample):**
+                \`\`\`
+                ${analysis.fileStructure}
+                \`\`\`
+
+                **Instructions for README.md:**
+                1.  **Project Title:** Use the project name as a main heading.
+                2.  **Description:** Write a plausible, one-paragraph description of what this project might do based on its language and file structure.
+                3.  **Installation:** Create a step-by-step guide on how to set up the project. If it's Python, include creating a virtual environment and installing from \`requirements.txt\`. If it's Node.js, mention running \`npm install\`.
+                4.  **Usage:** Provide a basic example of how to run the project. For example, \`python main.py\` or \`npm start\`. Make a reasonable guess based on the file structure.
+                5.  **Project Structure (Optional):** If you think it's helpful, briefly explain the role of the key files and folders.
+                6.  **Tone:** Keep it professional, clear, and encouraging for new contributors.
+
+                Do not include any introductory text like "Here is the README.md". Output only the raw Markdown content.
+            `;
+
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }]
+            };
+
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error(`API call failed with status: ${response.status}`);
+            }
+            const result = await response.json();
+            const candidate = result.candidates?.[0];
+
+            if (candidate && candidate.content?.parts?.[0]?.text) {
+                return candidate.content.parts[0].text;
+            } else {
+                console.error("Unexpected API response structure:", result);
+                throw new Error("Could not extract generated text from the AI response.");
+            }
+        }
+        
+        // --- Utility Buttons ---
+        copyButton.addEventListener('click', () => {
+            markdownOutput.select();
+            document.execCommand('copy');
+            const originalText = copyButton.innerHTML;
+            copyButton.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i><span>Copied!</span>`;
+            lucide.createIcons();
+            setTimeout(() => { copyButton.innerHTML = originalText; lucide.createIcons(); }, 2000);
+        });
+
+        downloadButton.addEventListener('click', () => {
+            const blob = new Blob([markdownOutput.value], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'README.md';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+        
+        markdownOutput.addEventListener('input', (e) => {
+            htmlPreview.innerHTML = marked.parse(e.target.value);
+        })
+
+    </script>
+</body>
+</html>
